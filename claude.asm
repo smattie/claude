@@ -5,7 +5,7 @@
 ;;; terms of the Do What The Fuck You Want To Public License, Version 2,
 ;;; as published by Sam Hocevar. See the COPYING file for more details.
 ;;;
-;;; 2020/07 - smattie <https://github.com/smattie>
+;;; 2020-2021 - smattie <https://github.com/smattie>
 ;;; ----------------------------------------------------------------------------
 
 format elf executable 3
@@ -17,10 +17,13 @@ define write       4
 define open        5
 define close       6
 define waitpid     7
+define chdir      12
 define alarm      27
 define signal     48
+define chroot     61
 define clone     120
 define nanosleep 162
+define capset    185
 define sendfile  187
 define socket    359
 define bind      361
@@ -32,6 +35,11 @@ define SIGALRM 14
 
 define PF_INET     2
 define SOCK_STREAM 1
+
+;; requires
+;;  cap_net_bind_service
+;;  cap_sys_chroot
+define LINUX_CAPABILITY_VERSION_3 0x20080522
 
 define CLONE_VM      0x00000100
 define CLONE_FS      0x00000200
@@ -49,9 +57,25 @@ define CLIENTTIMEOUT 13
 
 segment readable executable
 start:
+	mov eax, [esp]
+	lea ebx, [esp + 8]
+	dec eax
+	jle finish
+
+	mov eax, chdir
+	mov ebx, [ebx]
+	int 80h
+	test eax, eax
+	jnz finish
+
+	mov  al, chroot
+	int 80h
+	test eax, eax
+	jnz finish
+
 	sub esp, 64
 
-	mov eax, socket
+	mov  ax, socket
 	mov ebx, PF_INET
 	mov ecx, SOCK_STREAM
 	xor edx, edx
@@ -68,13 +92,21 @@ start:
 	mov  dl, 16
 	int 80h
 	test eax, eax
-	js  finish
+	jnz finish
 
-	mov eax, listen
+	mov  ax, listen
 	mov ecx, edx
 	int 80h
 	test eax, eax
-	js  finish
+	jnz finish
+
+	mov  ax, capset
+	mov ebx, esp
+	lea ecx, [esp + 8]
+	mov [esp], dword LINUX_CAPABILITY_VERSION_3
+	int 80h
+	test eax, eax
+	jnz finish
 
 	mov [esp], ebp       ;; XXX: esp/ecx is pointing at the top of the stack
 	mov  al, clone       ;; which you usually wouldn't want but in this case
