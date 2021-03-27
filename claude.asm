@@ -19,6 +19,7 @@ define close       6
 define waitpid     7
 define chdir      12
 define alarm      27
+define access     33
 define signal     48
 define chroot     61
 define clone     120
@@ -32,6 +33,7 @@ define listen    363
 define accept4   364
 
 define SIGALRM 14
+define R_OK 4
 
 define PF_INET     2
 define SOCK_STREAM 1
@@ -56,14 +58,22 @@ define REQBUFSZ 1024
 define CLIENTTIMEOUT 13
 
 segment readable executable
+
+;; ------------------------------------------------------------------
+;; > ebx: status
+finish:
+	xor eax, eax
+	inc eax
+	int 80h
+
+;; ------------------------------------------------------------------
 start:
 	mov eax, [esp]
-	lea ebx, [esp + 8]
 	dec eax
 	jle finish
 
-	mov eax, chdir
-	mov ebx, [ebx]
+	mov  ax, chdir
+	mov ebx, [esp + 8]
 	int 80h
 	test eax, eax
 	jnz finish
@@ -84,9 +94,9 @@ start:
 	test eax, eax
 	js  finish
 
-	mov [esp], dword 0x901f0002 ;; af_inet, 8080
-;	mov [esp], dword 0x50000002 ;; af_inet, 80
-	mov eax, bind
+;	mov [esp], dword 0x901f0002 ;; af_inet, 8080
+	mov [esp], dword 0x50000002 ;; af_inet, 80
+	mov  ax, bind
 	mov ebx, ebp
 	mov ecx, esp
 	mov  dl, 16
@@ -129,7 +139,7 @@ start:
 	test eax, eax
 	js  .loop
 
-	mov eax, fork
+	mov  ax, fork
 	int 80h
 	test eax, eax
 	jz  serve
@@ -137,9 +147,8 @@ start:
 
 .servererror:
 	mov eax, write
-	mov ecx, err500
-	movzx edx, byte [ecx]
-	inc ecx
+	mov ecx, err500+1
+	mov  dl, err500.len
 	int 80h
 
 .close:
@@ -177,11 +186,11 @@ serve:
 	int 80h
 
 	mov eax, alarm
-	mov ebx, CLIENTTIMEOUT
+	mov  bl, CLIENTTIMEOUT
 	int 80h
 
 	mov esi, esp
-	mov edx, REQBUFSZ
+	mov  dx, REQBUFSZ
 
 .readrequest:
 	mov eax, read
@@ -192,12 +201,11 @@ serve:
 	mov edi, err400
 	test eax, eax
 	jle dropclient
-	mov edi, err408
+	add edi, (err408-err400-1)
 
 	sub edx, eax
 	add esi, eax
-	lea eax, [esi-4]
-	mov eax, [eax]
+	mov eax, [esi-4]
 	cmp eax, 0a0d0a0dh
 	jne .readrequest
 
@@ -224,19 +232,28 @@ serve:
 	setnz cl
 	add edi, ecx
 
-.checkuri:
+.getpath:
 	mov ebx, index
 	cmp [edi], word 202fh
 	je  .sendfile
 
-	;; TODO: parse path
+	mov ebx, edi
+	mov  al, 20h
+	mov ecx, REQBUFSZ
+	repne scasb
+	xor eax, eax
+	mov [edi-1], eax
 
 	mov edi, err404
-	jmp dropclient
+	mov  al, access
+	mov ecx, R_OK
+	int 80h
+	test eax, eax
+	jnz dropclient
 
 .sendfile:
 	mov edi, err500
-	mov eax, open
+	mov  al, open
 	xor ecx, ecx
 	xor edx, edx
 	int 80h
@@ -253,32 +270,22 @@ serve:
 	mov eax, close
 	mov ebx, ecx
 	int 80h
-	jmp serve.newrequest
+	jmp .newrequest
 
 ;; ------------------------------------------------------------------
 ;; > edi: err&
 dropclient:
 	mov ebx, ebp
-	mov ecx, edi
+	lea ecx, [edi+1]
 	test edi, edi
 	jz  @f
 
-	movzx edx, byte [edi]
-
 	mov eax, write
-	inc ecx
+	movzx edx, byte [edi]
 	int 80h
 
 @@:
-	mov eax, close
-	int 80h
-
-;; ------------------------------------------------------------------
-;; > ebx: status
-finish:
-	xor eax, eax
-	inc eax
-	int 80h
+	jmp finish
 
 ;; ------------------------------------------------------------------
 alarmhandler:
