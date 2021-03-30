@@ -54,7 +54,7 @@ THREADFLAGS = \
 	CLONE_VM or CLONE_FILES  or CLONE_SIGHAND or \
 	CLONE_FS or CLONE_THREAD or CLONE_SYSVSEM
 
-define REQBUFSZ 1024
+define REQBUFSZ 2048
 define CLIENTTIMEOUT 13
 
 segment readable executable
@@ -209,28 +209,17 @@ serve:
 	cmp eax, 0a0d0a0dh
 	jne .readrequest
 
-.getmethod:
 	mov ecx, [esp]
 	mov eax, alarm
 	xor ebx, ebx
 	int 80h
 
-	or  edx, -1 ;; TODO: support head
-;	mov edx, ecx
-	xor ecx, 20544547h ;; get
-	xor edx, 44414548h ;; head
-	and ecx, edx       ;; good
-	mov edi, err400    ;; advice
+.getmethod:
+	mov edi, err400
+	xor ecx, 20544547h
 	jnz dropclient
 
-	mov edi, esp
-	add edi, 4
-
-	;; assuming there is one space between method and
-	;; uri, advance edi to the path for head requests
-	test [esp], byte 8 ;; G=47h H=48h
-	setnz cl
-	add edi, ecx
+	lea edi, [esp+4]
 
 .getpath:
 	mov ebx, index
@@ -239,14 +228,14 @@ serve:
 
 	mov ebx, edi
 	mov  al, 20h
-	mov ecx, REQBUFSZ
+	mov  cx, REQBUFSZ
 	repne scasb
 	xor eax, eax
 	mov [edi-1], eax
 
 	mov edi, err404
 	mov  al, access
-	mov ecx, R_OK
+	mov  cx, R_OK
 	int 80h
 	test eax, eax
 	jnz dropclient
